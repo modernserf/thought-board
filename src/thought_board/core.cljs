@@ -1,6 +1,7 @@
 (ns thought-board.core
   (:require [reagent.core :as reagent :refer [atom]]
-            [datascript.core :as d]))
+            [datascript.core :as d]
+            [posh.reagent :as p]))
 
 
 (enable-console-print!)
@@ -30,6 +31,7 @@
 (defonce conn
     (let [conn_ (d/create-conn schema)]
         (d/transact! conn_ data)
+        (p/posh! conn_)
         conn_))
 
 ; queries
@@ -42,20 +44,12 @@
                 [:li {:key (first value)} (f value)])
               items)])
 
-(def get-card '[:find [?title ?description]
-                :in $ ?id
-                :where [?id :card/title ?title]
-                       [?id :card/description ?description]])
-
 (defn card [{:keys [db id]}]
-    (let [[title description] (d/q get-card @db id)]
+    (let [{title :card/title desc :card/description } @(p/pull db [:card/title :card/description] id)]
       [:div
         [:h3 title]
-        [:p description]]))
+        [:p desc]]))
 
-(def get-col-title '[:find [?title]
-                     :in $ ?id
-                     :where [?id :column/title ?title]])
 
 (def get-cards '[:find ?card ?order
                  :in $ ?id
@@ -63,11 +57,25 @@
                         [?card :card/order ?order]])
 
 (defn column [{:keys [db id]}]
-    (let [[title]   (d/q get-col-title @db id)
-          cards     (d/q get-cards @db id)]
+    (let [{title :column/title} @(p/pull db [:column/title] id)
+          cards                 @(p/q get-cards db id)]
       [:div
         [:h2 title]
         (ul (fn [[id]] [card {:id id :db db}]) cards)]))
+
+
+(def get-cols '[:find ?column ?order
+                :in $ ?id
+                :where [?column :column/board ?id]
+                       [?column :column/order ?order]])
+
+(defn board [{:keys [db id]}]
+  (let [{title :board/title} @(p/pull db [:board/title] id)
+        cols                 @(p/q get-cols db id)]
+    [:div
+        [:h1 title]
+        (ul (fn [[id]] [column {:id id :db db}]) cols)]))
+
 
 (defn board-not-found [{:keys [slug]}]
     [:div
@@ -76,31 +84,17 @@
             slug
             "'."]])
 
-(def get-title '[:find [?title]
-                 :in $ ?slug
-                 :where [?id :board/slug ?slug]
-                        [?id :board/title ?title]])
-
-(def get-cols '[:find ?column ?order
-                :in $ ?slug
-                :where [?id :board/slug ?slug]
-                       [?column :column/board ?id]
-                       [?column :column/order ?order]])
-
-(defn board [{:keys [db state]}]
-  (let [slug    (:slug @state)
-        [title] (d/q get-title @db slug)
-        cols    (d/q get-cols @db slug)]
-     (cond (nil? title) [board-not-found {:slug slug}]
-           :else [:div
-                    [:h1 title]
-                    (ul (fn [[id]] [column {:id id :db db}]) cols)])))
-
-
 ; TODO routing, DI
 
-(defn app [props]
-    [board props])
+(def get-board '[:find [?id]
+                 :in $ ?slug
+                 :where [?id :board/slug ?slug]])
+
+(defn app [{:keys [db state]}]
+    (let [{slug :slug} @state
+          [id]         @(p/q get-board db slug)]
+      (cond (nil? id) [board-not-found {:slug slug}]
+            :else     [board {:db db :id id}])))
 
 
 (reagent/render-component [app {:db conn :state app-state}]
