@@ -39,42 +39,44 @@
 
 (defonce app-state (reagent/atom {:slug "demo-board"}))
 
-(defn ul [f items]
-    [:ul (map (fn [value]
-                [:li {:key (first value)} (f value)])
-              items)])
+
+(defn q-children [child-key order-key db id]
+    (let [q  [:find '?child '?order
+              :in '$ '?id
+              :where ['?child child-key '?id]
+                     ['?child order-key '?order]]]
+     (->> @(p/q q db id)
+        (map #(zipmap [:id :order] %))
+        (sort-by :order)
+        (map :id))))
+
+
+(defn ulid [component props ids]
+  [:ul (map #(vector :li {:key %} [component (assoc props :id %)]) ids)])
+
 
 (defn card [{:keys [db id]}]
-    (let [{title :card/title desc :card/description } @(p/pull db [:card/title :card/description] id)]
+    (let [{title :card/title
+           desc :card/description} @(p/pull db [:card/title :card/description] id)]
       [:div
         [:h3 title]
         [:p desc]]))
 
 
-(def get-cards '[:find ?card ?order
-                 :in $ ?id
-                 :where [?card :card/column ?id]
-                        [?card :card/order ?order]])
-
 (defn column [{:keys [db id]}]
     (let [{title :column/title} @(p/pull db [:column/title] id)
-          cards                 @(p/q get-cards db id)]
+          cards                 (q-children :card/column :card/order db id)]
       [:div
         [:h2 title]
-        (ul (fn [[id]] [card {:id id :db db}]) cards)]))
+        (ulid card {:db db} cards)]))
 
-
-(def get-cols '[:find ?column ?order
-                :in $ ?id
-                :where [?column :column/board ?id]
-                       [?column :column/order ?order]])
 
 (defn board [{:keys [db id]}]
   (let [{title :board/title} @(p/pull db [:board/title] id)
-        cols                 @(p/q get-cols db id)]
+        cols                 (q-children :column/board :column/order db id)]
     [:div
         [:h1 title]
-        (ul (fn [[id]] [column {:id id :db db}]) cols)]))
+        (ulid column {:db db} cols)]))
 
 
 (defn board-not-found [{:keys [slug]}]
